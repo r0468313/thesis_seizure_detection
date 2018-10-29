@@ -1,0 +1,75 @@
+import numpy as np
+from sklearn.model_selection import train_test_split
+import tensorflow as tf
+from keras.models import Sequential 
+from keras.layers import Dense, Activation , Flatten, Dropout
+from keras.layers import Convolution2D, MaxPooling2D
+from keras.utils import np_utils
+
+# Generating the data
+data = []
+labels = []
+
+time_of_view        = 90. # s.
+
+sampling_rate       = 30. # Hz
+sampling_period     = 1. / sampling_rate # s
+sample_number       = time_of_view / sampling_period
+sampling_time       = np.linspace (0, time_of_view, sample_number)
+
+carrier_frequency_1   = 5.
+carrier_frequency_2 = 20.
+
+for i in range(0,100):
+    matrix = np.zeros((20,2700))
+    for j in range(0,20):
+        sampling_signal = np.sin (2 * np.pi * carrier_frequency_1 *sampling_time)
+        noise = np.random.normal(0,0.2,2700)
+        sampling_signal += noise
+        matrix[j,:] = sampling_signal
+    data.append(matrix.tolist())
+    labels.append(0)
+
+for i in range(0,100):
+    matrix = np.zeros((20,2700))
+    for j in range(0,20):
+        sampling_signal = np.sin (2 * np.pi * carrier_frequency_2 *sampling_time)
+        noise = np.random.normal(0,0.2,2700)
+        sampling_signal += noise
+        matrix[j,:] = sampling_signal
+    data.append(matrix.tolist())
+    labels.append(1)
+    
+# Splitting the data in test and train & making them the right sizes
+(trainX, testX, trainY, testY) = train_test_split(data,
+	labels, test_size=0.25, random_state=42)
+trainX_tensor = tf.convert_to_tensor(trainX)
+testX_tensor = tf.convert_to_tensor(testX)
+trainY_tensor = np_utils.to_categorical(trainY, 2)
+testY_tensor = np_utils.to_categorical(testY, 2)
+
+# convolutional and pooling layers
+model = Sequential()
+
+model.add(Convolution2D(32, 3, 3, activation='relu', input_shape=(20,2700,1)))
+model.add(Convolution2D(32, 3, 3, activation='relu'))
+model.add(MaxPooling2D(pool_size=(2,2)))
+model.add(Dropout(0.25)) #to prevent overfitting
+
+#fully connected layer and output layer
+
+model.add(Flatten())
+model.add(Dense(128, activation='relu'))
+model.add(Dropout(0.5))
+model.add(Dense(2, activation='softmax'))
+
+#compile model & fit model
+model.compile(loss='categorical_crossentropy',
+              optimizer='adam',
+              metrics=['accuracy'])
+model.fit(trainX_tensor, trainY_tensor, 
+          steps_per_epoch = 3, epochs=10, verbose=1)
+
+#evaluate on test data
+score = model.evaluate(testX_tensor, testY_tensor, verbose=0)
+print(score)
