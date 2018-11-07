@@ -1,0 +1,135 @@
+from os.path import join
+import keras as keras
+from keras.models import Sequential
+from keras.layers import Dense, Dropout, Flatten, Conv2D, MaxPooling2D, BatchNormalization, Activation
+from keras.losses import categorical_crossentropy
+from keras.utils import to_categorical
+from keras.optimizers import Adadelta
+from sklearn.metrics import cohen_kappa_score, confusion_matrix, roc_curve, auc
+import numpy as np
+from myFunc2 import iNormalize_Segment
+import matplotlib.pyplot as plt
+
+
+#%% params
+outdir = r'Epoching_3Fold'
+k=2
+dpVal = 0.5
+
+Downsample_step = 4;
+
+maxEpoch = 100
+BatchSize = 256
+
+
+#%% load the data
+if(1):
+    print('Loading data...')
+    r = np.load(join(outdir, 'Epoched_30_30_k%d.npz'%(k)))
+
+    print('Maping data xtr...')
+    xtr = r['Xtr']
+    print('Normalizing data x...')
+    iNormalize_Segment(xtr)
+    #(xtr,m,s) = iNormalize(xtr, ntype = 0)
+    
+#    print('Maping data xvl...')
+#    xvl = r['Xvl']
+#    print('Normalizing data xvl...')
+#    iNormalize_Segment(xvl)
+#    #(xvl) = iNormalize(xvl, mean=m , std=s, ntype = 0)
+
+    print('Maping data y...')
+    ytr = r['Ytr']
+#    yvl = r['Yvl']
+    
+    ytrc = to_categorical(ytr)
+#    yvlc = to_categorical(yvl)
+
+    del r
+     
+    print('expanding data...')
+    xtr = np.expand_dims(xtr, axis=3)
+#    xvl = np.expand_dims(xvl, axis=3)
+
+    #%% downsample nonseizure 
+    if(1):
+        (ind0,) = np.where(ytr==0)
+        ind0 = ind0[0::Downsample_step]
+        (ind1,) = np.where(ytr==1)
+        ind = np.concatenate((ind0,ind1))
+        ind.sort()
+        
+        xtr = xtr[ind,:,:,:]
+        ytr = ytr[ind]        
+        ytrc = ytrc[ind,:]
+    
+
+#%% size
+N = xtr.shape[0]
+T = xtr.shape[1]
+CH = xtr.shape[2]
+
+#%% make the network design 
+model = Sequential()
+model.add(Conv2D(10, kernel_size=(64, 1), input_shape=(T, CH, 1), padding='same'))
+model.add(Activation('relu'))
+model.add(BatchNormalization())
+model.add(MaxPooling2D(pool_size=(8, 1)))
+model.add(Dropout(dpVal))
+
+model.add(Conv2D(20, kernel_size=(5, 1), padding='same'))
+model.add(Activation('relu'))
+model.add(BatchNormalization())
+model.add(MaxPooling2D(pool_size=(4, 1)))
+model.add(Dropout(dpVal))
+
+model.add(Conv2D(20, kernel_size=(5, 1), padding='same'))
+model.add(Activation('relu'))
+model.add(BatchNormalization())
+model.add(MaxPooling2D(pool_size=(4, 1)))
+model.add(Dropout(dpVal))
+
+model.add(MaxPooling2D(pool_size=(1, CH)))
+
+model.add(Conv2D(30, kernel_size=(8, 1), padding='same'))
+model.add(Activation('relu'))
+model.add(BatchNormalization())
+model.add(MaxPooling2D(pool_size=(2, 1)))
+model.add(Dropout(dpVal))
+
+model.add(Flatten())
+model.add(Dense(10, activation='sigmoid'))
+model.add(BatchNormalization())
+model.add(Dropout(dpVal))
+
+model.add(Dense(2, activation='softmax'))
+
+model.summary()
+
+#%% compile the model
+model.compile(loss=categorical_crossentropy,
+              optimizer=Adadelta(),
+              metrics=['accuracy'])
+class_weight = np.flip(ytrc.sum(0) / ytrc.sum(0).sum(0), 0)
+class_weight = {0: class_weight[0], 1: class_weight[1]}
+#%% train and save the model
+History = model.fit(xtr, ytrc, epochs=maxEpoch, batch_size=BatchSize,
+              validation_data=None,
+              class_weight=class_weight)
+
+keras.models.save_model(model, 'model_pre')
+
+np.savez_compressed(join(outdir, 'history.npz'), History=History)
+#%% 
+#model = keras.models.load_model('model_pre')
+#yhvl = model.predict(xvl)
+##np.savetxt('yhVal.csv',(np.expand_dims(yvl,1),np.expand_dims(yhvl.argmax(1),1),yhvl))
+#np.savetxt('yhVal.csv',(yvl,yhvl.argmax(1),yhvl[:,0],yhvl[:,1]))
+#
+#print(cohen_kappa_score(yvl, yhvl.argmax(1)))
+#conf = confusion_matrix(yvl, yhvl.argmax(1))
+#ACC = (conf[0,0] + conf[1,1])/conf.sum(0).sum(0)
+#Sen = conf[1,1]/conf.sum(1)[1]
+#Spe = conf[0,0]/conf.sum(1)[0]
+#Sel = conf[1,1]/conf.sum(0)[1]
